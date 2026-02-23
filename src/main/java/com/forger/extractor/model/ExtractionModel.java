@@ -1,9 +1,9 @@
-package com.forger.extractor.domain.model;
+package com.forger.extractor.model;
 
 import lombok.*;
 
-import java.net.URL;
-import java.util.List;
+import java.net.URI;
+import java.util.Set;
 
 @Builder
 @Getter
@@ -15,9 +15,9 @@ public class ExtractionModel {
 
     private String content;
 
-    private URL url;
+    private URI url;
 
     private String description;
 
-    private List<String> innerUrls;
+    private Set<URI> innerUris;
 }

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Nginx Link & Resource Test Page</title>
+
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
+        <link rel="icon" href="https://nginx.org/favicon.ico">
+
+        <style>
+            body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+            .section { padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+            .valid { color: green; }
+            .invalid { color: red; }
+        </style>
+    </head>
+    <body>
+
+        <h1>Nginx Link Test Environment</h1>
+
+        <div class="grid">
+            <div class="section">
+                <h2>Anchor Tags <code>&lt;a&gt;</code></h2>
+                <ul>
+                    <li><a href="https://example.com" class="valid">Valid External Link</a></li>
+                    <li><a href="/index.html" class="valid">Valid Relative Link (Self)</a></li>
+                    <li><a href="/this-page-is-a-404.html" class="invalid">Invalid Relative Link (404)</a></li>
+                    <li><a href="https://this-domain-is-completely-fake-12345.com" class="invalid">Invalid External Link (DNS Error)</a></li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>Image Tags <code>&lt;img&gt;</code></h2>
+                <p class="valid">Valid Image:</p>
+                <img src="/src/test/resources/container/nginx/image/gray.png" alt="Valid Placeholder">
+                <p class="invalid">Invalid Image (Triggers 404):</p>
+                <img src="/images/non-existent-image.jpg" alt="Broken Image">
+            </div>
+
+            <div class="section">
+                <h2>Script Tags <code>&lt;script&gt;</code></h2>
+                <p>Check your browser console / Nginx error logs for the broken script.</p>
+                <script src="https://code.jquery.com/jquery-3.6.0.slim.min.js"></script>
+                <script src="/js/broken-script-that-triggers-404.js"></script>
+            </div>
+
+            <div class="section">
+                <h2>Iframe Tags <code>&lt;iframe&gt;</code></h2>
+                <p>Valid (Example.com):</p>
+                <iframe src="https://example.com" width="100%" height="100" title="Valid Iframe"></iframe>
+                <p>Invalid (404 route):</p>
+                <iframe src="/broken-iframe-endpoint" width="100%" height="50" title="Invalid Iframe"></iframe>
+            </div>
+
+            <div class="section">
+                <h2>Media Tags <code>&lt;video&gt;, &lt;audio&gt;, &lt;source&gt;, &lt;track&gt;</code></h2>
+
+                <p><strong>Audio:</strong></p>
+                <audio controls>
+                    <source src="https://www.w3schools.com/html/horse.ogg" type="audio/ogg">
+                    <source src="/media/broken-audio.mp3" type="audio/mpeg">
+                </audio>
+
+                <p><strong>Video (with broken subtitles):</strong></p>
+                <video width="200" controls>
+                    <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
+                    <source src="/media/broken-video.mp4" type="video/mp4">
+                    <track src="/media/broken-subtitles.vtt" kind="subtitles" srclang="en" label="English">
+                </video>
+            </div>
+
+            <div class="section">
+                <h2>Form Actions <code>&lt;form action&gt;</code></h2>
+                <form action="https://google.com/search" method="GET" target="_blank">
+                    <input type="text" name="q" value="nginx" hidden>
+                    <button type="submit" class="valid">Valid Form Submit</button>
+                </form>
+                <br>
+                <form action="/submit-broken-endpoint" method="POST">
+                    <button type="submit" class="invalid">Invalid Form Submit (POST 404)</button>
+                </form>
+            </div>
+
+            <div class="section">
+                <h2>Object & Embed <code>&lt;object&gt;, &lt;embed&gt;</code></h2>
+                <embed src="https://via.placeholder.com/100x20?text=Valid+Embed" width="100" height="20">
+                <object data="/documents/broken-document.pdf" width="100" height="20">
+                    Fallback for broken object.
+                </object>
+            </div>
+
+            <div class="section">
+                <h2>Image Maps <code>&lt;area&gt;</code></h2>
+                <img src="https://via.placeholder.com/200x50?text=Click+Left+(Valid)+or+Right+(Invalid)" usemap="#testmap" alt="Map">
+                <map name="testmap">
+                    <area shape="rect" coords="0,0,100,50" href="https://example.com" alt="Valid Area">
+                    <area shape="rect" coords="100,0,200,50" href="/broken-area-link" alt="Invalid Area">
+                </map>
+            </div>
+
+            <div class="section">
+                <h2>Citation Links <code>cite="..."</code></h2>
+                <blockquote cite="https://example.com">
+                    "Valid quote citation."
+                </blockquote>
+                <blockquote cite="/broken-quote-source">
+                    "Invalid quote citation."
+                </blockquote>
+                <p>
+                    <del cite="/broken-delete-reason">Deleted text</del> and
+                    <ins cite="https://example.com">inserted text</ins>.
+                </p>
+            </div>
+        </div>
+    </body>
+</html>

@@ -1,6 +1,6 @@
-package com.forger.extractor.domain.dto;
+package com.forger.api.dto;
 
-import com.forger.extractor.domain.model.ExtractionModel;
+import com.forger.extractor.model.ExtractionModel;
 import jakarta.annotation.Nonnull;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
