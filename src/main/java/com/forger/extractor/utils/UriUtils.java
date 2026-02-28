@@ -27,13 +27,14 @@ public class UriUtils {
 
     public @Nonnull Pair<Boolean, Integer> validateUriConnection(@Nullable URI uri, @Nonnull Duration timeout) {
         if (Objects.isNull(uri))
-            throw new UriConnectException("URI can " +
+            throw new IllegalArgumentException("URI can " +
                     "not be null on connection validation");
 
         try {
             Connection connection = Jsoup.connect(uri.toString())
                     .timeout((Math.toIntExact(timeout.toMillis())))
-                    .followRedirects(false);
+                    .followRedirects(true)
+                    .ignoreHttpErrors(true);
 
             Connection.Response response = connection.execute();
 

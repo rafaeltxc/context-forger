@@ -1,19 +1,24 @@
 package com.forger.extractor.utils;
 
+import com.forger.extractor.exception.UriConnectException;
 import com.forger.tool.nginx.AbstractNginxTestContainer;
 import com.forger.tool.measurement.TestDuration;
 import com.forger.tool.measurement.TestWheigt;
 import com.google.common.collect.ImmutableList;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
-import org.gradle.internal.Pair;
+import org.apache.commons.lang3.tuple.Pair;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.mockito.Mockito;
 
+import java.io.IOException;
+import java.net.URI;
+import java.time.Duration;
 import java.util.List;
 
 @QuarkusTest
@@ -30,6 +35,7 @@ public class UriUtilsTest extends AbstractNginxTestContainer {
             Pair.of(true, "http://subdomain.fake-url.org:8080/api/v1/users?id=123&status=active"),
             Pair.of(true, "ftp://testuser:securepassword@ftp.madeup-server.net/downloads/file.zip"),
             Pair.of(true, "https://anothertest.io/about#team-section"),
+            Pair.of(false, "http://localhost:123456"),
             Pair.of(false, "mailto:hello@thisisnotarealemail.com"),
             Pair.of(false, "wss://websocket.test-server.dev/stream"),
 
@@ -87,5 +93,37 @@ public class UriUtilsTest extends AbstractNginxTestContainer {
     }
 
     @Test
-    public void testInvalidUri() {}
+    @DisplayName("Test null validation before validating connection")
+    public void testNullUriConnection() {
+        Exception exception =Assertions.assertThrows(IllegalArgumentException.class,
+                () -> this.uriUtils.validateUriConnection(null, Mockito.any()));
+
+        Assertions.assertEquals("URI can " +
+                "not be null on connection validation", exception.getMessage());
+    }
+
+    @Test
+    @DisplayName("Test valid connection")
+    public void testValidUriConnection() {
+        URI nginxUri = URI.create(
+                super.getNginxUrl());
+
+        Pair<Boolean, Integer> executionResult =
+                this.uriUtils.validateUriConnection(nginxUri, Duration.ofSeconds(5));
+
+        Assertions.assertEquals(true, executionResult.getLeft());
+        Assertions.assertEquals(200, executionResult.getRight());
+    }
+
+    @Test
+    @DisplayName("Test error on valid connection")
+    public void testValidUriConnectionError() {
+        URI failingUrl = URI.create("http://localhost:65432");
+
+        Exception exception = Assertions.assertThrows(UriConnectException.class,
+                () -> this.uriUtils.validateUriConnection(failingUrl, Duration.ofSeconds(5)));
+
+        Assertions.assertEquals("java.net.ConnectException", exception.getMessage());
+        Assertions.assertInstanceOf(IOException.class, exception.getCause());
+    }
 }

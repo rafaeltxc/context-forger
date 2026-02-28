@@ -32,6 +32,15 @@ public abstract class AbstractNginxTestContainer {
         nginxContainer.stop();
     }
 
+    protected String getNginxHost() {
+        return nginxContainer.getHost();
+    }
+
+    protected String getNginxHostPort() {
+        return nginxContainer.getHost()
+                .substring(nginxContainer.getHost().lastIndexOf(':') + 1);
+    }
+
     protected String getNginxUrl() {
         return "http://" +
                 nginxContainer.getHost() + ":" +
