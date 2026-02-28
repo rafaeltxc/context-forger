@@ -81,7 +81,7 @@ public class UriUtilsTest extends AbstractNginxTestContainer {
 
     @ParameterizedTest()
     @NullAndEmptySource
-    @DisplayName("URI empty URI")
+    @DisplayName("Test empty and null URIs")
     public void testEmptyUri(String testUri) {
         Assertions.assertEquals(false, uriUtils.validateUri(testUri));
     }
