@@ -105,7 +105,7 @@ public class WebScraper {
             return ExtractionModel.builder()
                     .title(title)
                     .content(bodyHtml)
-                    .url(URI.create(document.baseUri()))
+                    .uri(URI.create(document.baseUri()))
                     .description(description);
         } catch (Exception e) {
             Log.errorf("An error was encountered while " +

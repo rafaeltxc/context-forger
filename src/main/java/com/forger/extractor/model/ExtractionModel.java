@@ -7,15 +7,15 @@ import java.util.Set;
 
 @Builder
 @Getter
-@NoArgsConstructor(access = AccessLevel.NONE)
-@AllArgsConstructor(access = AccessLevel.NONE)
+@NoArgsConstructor
+@AllArgsConstructor
 public class ExtractionModel {
 
     private String title;
 
     private String content;
 
-    private URI url;
+    private URI uri;
 
     private String description;
 

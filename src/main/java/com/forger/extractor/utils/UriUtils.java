@@ -18,14 +18,18 @@ import java.util.Objects;
 @ApplicationScoped
 public class UriUtils {
 
-    public @Nonnull Boolean validateUri(@Nonnull URI uri) {
+    public @Nonnull Boolean validateUri(@Nullable String uri) {
         UrlValidator urlValidator = new
                 UrlValidator(UrlValidator.ALLOW_LOCAL_URLS);
 
-        return urlValidator.isValid(uri.toString());
+        return urlValidator.isValid(uri);
     }
 
-    public @Nonnull Pair<Boolean, Integer> validateUriConnection(@Nonnull URI uri, @Nonnull Duration timeout) {
+    public @Nonnull Pair<Boolean, Integer> validateUriConnection(@Nullable URI uri, @Nonnull Duration timeout) {
+        if (Objects.isNull(uri))
+            throw new UriConnectException("URI can " +
+                    "not be null on connection validation");
+
         try {
             Connection connection = Jsoup.connect(uri.toString())
                     .timeout((Math.toIntExact(timeout.toMillis())))

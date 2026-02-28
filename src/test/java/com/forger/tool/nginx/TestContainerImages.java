@@ -1,4 +1,4 @@
-package com.forger;
+package com.forger.tool.nginx;
 
 import lombok.Getter;
 

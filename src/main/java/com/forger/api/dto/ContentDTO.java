@@ -7,7 +7,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.net.URL;
+import java.net.URI;
 import java.util.Objects;
 
 @Getter
@@ -15,7 +15,7 @@ import java.util.Objects;
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class ContentDTO {
 
-    private URL url;
+    private URI uri;
 
     private String title;
 
@@ -30,10 +30,10 @@ public class ContentDTO {
         if (Objects.isNull(extractionModel.getContent()))
             throw new IllegalArgumentException("Extraction content cannot be null");
 
-        if (Objects.isNull(extractionModel.getUrl()))
+        if (Objects.isNull(extractionModel.getUri()))
             throw new IllegalArgumentException("Extraction url cannot be null");
 
-        return new ContentDTO(extractionModel.getUrl(), extractionModel.getTitle(),
+        return new ContentDTO(extractionModel.getUri(), extractionModel.getTitle(),
                 cleandUpContent, extractionModel.getDescription());
     }
 }
