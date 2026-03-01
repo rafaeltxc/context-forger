@@ -7,8 +7,7 @@ import java.util.Set;
 
 @Builder
 @Getter
-@AllArgsConstructor(access = AccessLevel.NONE)
-@NoArgsConstructor(access =  AccessLevel.PRIVATE)
+@AllArgsConstructor
 public class ExtractionModel {
 
     private String title;
