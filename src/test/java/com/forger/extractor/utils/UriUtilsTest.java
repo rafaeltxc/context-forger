@@ -2,8 +2,6 @@ package com.forger.extractor.utils;
 
 import com.forger.extractor.exception.UriConnectException;
 import com.forger.tool.nginx.AbstractNginxTestContainer;
-import com.forger.tool.measurement.TestDuration;
-import com.forger.tool.measurement.TestWheigt;
 import com.google.common.collect.ImmutableList;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -21,8 +19,10 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 
+import com.forger.tool.measurement.TestMeasurement.FastTest;
+
 @QuarkusTest
-@TestWheigt(TestDuration.VERY_FAST)
+@FastTest
 public class UriUtilsTest extends AbstractNginxTestContainer {
 
     @Inject
