@@ -1,6 +1,6 @@
 package com.forger.api.dto;
 
-import com.forger.extractor.model.ExtractionModel;
+import com.forger.extractor.domain.model.Extraction;
 import jakarta.annotation.Nonnull;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -24,16 +24,16 @@ public class ContentDTO {
     private String description;
 
     public static @Nonnull ContentDTO from(
-            @Nonnull ExtractionModel extractionModel,
+            @Nonnull Extraction extraction,
             @Nonnull String cleandUpContent
     ) {
-        if (Objects.isNull(extractionModel.getContent()))
+        if (Objects.isNull(extraction.getContent()))
             throw new IllegalArgumentException("Extraction content cannot be null");
 
-        if (Objects.isNull(extractionModel.getUri()))
+        if (Objects.isNull(extraction.getUri()))
             throw new IllegalArgumentException("Extraction url cannot be null");
 
-        return new ContentDTO(extractionModel.getUri(), extractionModel.getTitle(),
-                cleandUpContent, extractionModel.getDescription());
+        return new ContentDTO(extraction.getUri(), extraction.getTitle(),
+                cleandUpContent, extraction.getDescription());
     }
 }

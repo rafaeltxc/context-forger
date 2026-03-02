@@ -1,4 +1,4 @@
-package com.forger.extractor.model;
+package com.forger.extractor.domain.model;
 
 import lombok.*;
 
@@ -8,7 +8,7 @@ import java.util.Set;
 @Builder
 @Getter
 @AllArgsConstructor
-public class ExtractionModel {
+public class Extraction {
 
     private String title;
 

@@ -1,10 +1,12 @@
 package com.forger.extractor.application.web;
 
-import com.forger.extractor.model.ExtractionModel;
+import com.forger.extractor.domain.model.Extraction;
+import com.forger.extractor.domain.record.CrawlerConfiguration;
 import com.forger.extractor.exception.UnreachableUriException;
 import com.forger.extractor.exception.UriConnectException;
 import com.forger.extractor.exception.WebContentExtractionException;
 import com.forger.extractor.exception.WebUriExtractionException;
+import com.forger.extractor.infrastructure.CrawlerConfigurationProvider;
 import com.forger.extractor.utils.UriUtils;
 import io.quarkus.logging.Log;
 import io.smallrye.mutiny.Uni;
@@ -12,7 +14,6 @@ import jakarta.annotation.Nonnull;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.commons.lang3.tuple.Pair;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -43,20 +44,28 @@ public class WebScraper {
 
     private final UriUtils uriUtils;
 
-    @ConfigProperty(name = "forger.connection.timeout")
-    Integer connectionTimeout;
+    private final CrawlerConfigurationProvider configurationProvider;
 
     @Inject
-    public WebScraper(UriUtils  uriUtils) {
+    public WebScraper(
+            UriUtils  uriUtils,
+            CrawlerConfigurationProvider configurationProvider
+    ) {
         this.uriUtils = uriUtils;
+        this.configurationProvider = configurationProvider;
     }
 
-    public @Nonnull Uni<ExtractionModel> scrapeUriAsync(URI uri) {
-        return Uni.createFrom().item(this.scrapeUri(uri))
+    public void crawlFrom() {
+        CrawlerConfiguration crawlerConfig =
+                this.configurationProvider.toDomain();
+    }
+
+    public @Nonnull Uni<Extraction> scrapeFrom(@Nonnull URI uri, Duration timeout) {
+        return Uni.createFrom().item(this.processUri(uri))
                 .onSubscription()
                 .invoke(() -> {
-                    Pair<Boolean, Integer> connection = uriUtils.validateUriConnection(
-                            uri, Duration.ofSeconds(connectionTimeout));
+                    Pair<Boolean, Integer> connection =
+                            uriUtils.validateUriConnection(uri, timeout);
 
                     if (connection.getLeft())
                         return;
@@ -80,10 +89,10 @@ public class WebScraper {
                 .atMost(3);
     }
 
-    protected @Nonnull ExtractionModel scrapeUri(@Nonnull URI uri) {
+    protected @Nonnull Extraction processUri(@Nonnull URI uri) {
         Document document = this.connectTo(uri);
 
-        ExtractionModel.ExtractionModelBuilder
+        Extraction.ExtractionBuilder
                 extractionBuilder = this.getDataFrom(document);
 
         extractionBuilder.innerUris(this.getUrisFrom(document));
@@ -91,7 +100,7 @@ public class WebScraper {
         return extractionBuilder.build();
     }
 
-    protected @Nonnull ExtractionModel.ExtractionModelBuilder getDataFrom(@Nonnull Document document) {
+    protected @Nonnull Extraction.ExtractionBuilder getDataFrom(@Nonnull Document document) {
         try {
             Elements metaOgTitle = document.select("meta[property=og:title]");
             String title = metaOgTitle.attr("content");
@@ -102,7 +111,7 @@ public class WebScraper {
             Element documentBody = document.body();
             String bodyHtml = documentBody.html();
 
-            return ExtractionModel.builder()
+            return Extraction.builder()
                     .title(title)
                     .content(bodyHtml)
                     .uri(URI.create(document.baseUri()))
