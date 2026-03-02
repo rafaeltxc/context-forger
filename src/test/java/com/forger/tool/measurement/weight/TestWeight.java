@@ -1,4 +1,4 @@
-package com.forger.tool.measurement;
+package com.forger.tool.measurement.weight;
 
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -12,7 +12,7 @@ import java.lang.annotation.Target;
 
 @AllArgsConstructor(access = AccessLevel.NONE)
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
-public final class TestMeasurement {
+public final class TestWeight {
 
     @Retention(RetentionPolicy.RUNTIME)
     @Target(ElementType.TYPE)

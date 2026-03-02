@@ -19,7 +19,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 
-import com.forger.tool.measurement.TestMeasurement.FastTest;
+import com.forger.tool.measurement.weight.TestWeight.FastTest;
 
 @QuarkusTest
 @FastTest

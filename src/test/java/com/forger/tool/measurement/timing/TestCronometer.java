@@ -1,4 +1,4 @@
-package com.forger.tool.timing;
+package com.forger.tool.measurement.timing;
 
 import org.junit.jupiter.api.extension.AfterTestExecutionCallback;
 import org.junit.jupiter.api.extension.BeforeTestExecutionCallback;

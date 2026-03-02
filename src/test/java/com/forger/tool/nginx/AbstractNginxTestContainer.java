@@ -1,6 +1,6 @@
 package com.forger.tool.nginx;
 
-import com.forger.tool.timing.TestCronometer;
+import com.forger.tool.measurement.timing.TestCronometer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.extension.ExtendWith;
