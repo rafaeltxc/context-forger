@@ -37,6 +37,6 @@ public class TestCronometer implements BeforeTestExecutionCallback, AfterTestExe
         System.out.println(timeoutLabel);
 
         System.out.println(ctx.getDisplayName() + " took "
-                + Duration.ofNanos(duration).toSeconds() + "ns");
+                + Duration.ofNanos(duration).toSeconds() + "s");
     }
 }
