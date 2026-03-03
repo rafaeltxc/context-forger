@@ -1,8 +1,10 @@
 package com.forger.extractor.domain.record;
 
+import java.time.Duration;
+
 public record CrawlerConfiguration(
-    int connectionTimeout,
-    int connectionTWorkers,
+    Duration connectionTimeout,
+    int connectionWorkers,
     int domainFollows,
     int domainDeepness
 ) {}

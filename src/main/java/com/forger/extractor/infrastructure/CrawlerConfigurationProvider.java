@@ -4,6 +4,8 @@ import com.forger.extractor.domain.record.CrawlerConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.time.Duration;
+
 @ApplicationScoped
 public class CrawlerConfigurationProvider {
 
@@ -20,7 +22,9 @@ public class CrawlerConfigurationProvider {
     int domainDeepness;
 
     public CrawlerConfiguration toDomain() {
-        return new CrawlerConfiguration(this.connectionTimeout,
+        Duration connectionTimeout = Duration.ofSeconds(this.connectionTimeout);
+
+        return new CrawlerConfiguration(connectionTimeout,
                 this.connectionWorkers, this.domainFollows, this.domainDeepness);
     }
 }

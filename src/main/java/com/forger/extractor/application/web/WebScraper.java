@@ -9,6 +9,7 @@ import com.forger.extractor.exception.WebUriExtractionException;
 import com.forger.extractor.infrastructure.CrawlerConfigurationProvider;
 import com.forger.extractor.utils.UriUtils;
 import io.quarkus.logging.Log;
+import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 import jakarta.annotation.Nonnull;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -55,9 +56,16 @@ public class WebScraper {
         this.configurationProvider = configurationProvider;
     }
 
-    public void crawlFrom() {
-        CrawlerConfiguration crawlerConfig =
+    public @Nonnull Multi<Void> crawlFrom(URI uri) {
+       CrawlerConfiguration crawlerConfig =
                 this.configurationProvider.toDomain();
+
+       // Resumption process ??
+
+       return this.scrapeFrom(uri, crawlerConfig.connectionTimeout())
+               .onItem().transformToMulti(extraction ->
+                       Multi.createFrom().iterable(extraction.getInnerUris()))
+               .onItem().transformToMultiAndMerge(this::crawlFrom);
     }
 
     public @Nonnull Uni<Extraction> scrapeFrom(@Nonnull URI uri, Duration timeout) {
