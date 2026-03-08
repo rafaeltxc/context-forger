@@ -1,5 +1,6 @@
 package com.forger.extractor.application.web;
 
+import com.forger.extractor.data.cache.ExtractionCaching;
 import com.forger.extractor.domain.model.Extraction;
 import com.forger.extractor.domain.record.CrawlerConfiguration;
 import com.forger.extractor.exception.UnreachableUriException;
@@ -7,14 +8,15 @@ import com.forger.extractor.exception.UriConnectException;
 import com.forger.extractor.exception.WebContentExtractionException;
 import com.forger.extractor.exception.WebUriExtractionException;
 import com.forger.extractor.infrastructure.CrawlerConfigurationProvider;
+import com.forger.extractor.service.ExtractionService;
 import com.forger.extractor.utils.UriUtils;
 import io.quarkus.logging.Log;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.apache.commons.lang3.tuple.Pair;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -43,58 +45,73 @@ public class WebScraper {
 
     private static final String CONNECTION_REFERER = "http://www.google.com";
 
+    private final ExtractionService extractionService;
+
+    private final ExtractionCaching extractionCaching;
+
     private final UriUtils uriUtils;
 
     private final CrawlerConfigurationProvider configurationProvider;
 
     @Inject
     public WebScraper(
-            UriUtils  uriUtils,
-            CrawlerConfigurationProvider configurationProvider
+            ExtractionService extractionService,
+            ExtractionCaching extractionCaching,
+            CrawlerConfigurationProvider configurationProvider,
+            UriUtils uriUtils
     ) {
-        this.uriUtils = uriUtils;
+        this.extractionService = extractionService;
+        this.extractionCaching = extractionCaching;
         this.configurationProvider = configurationProvider;
+        this.uriUtils = uriUtils;
     }
 
-    public @Nonnull Multi<Void> crawlFrom(URI uri) {
+    @SuppressWarnings("ReactiveStreamsUnusedPublisher")
+    public @Nonnull Multi<Void> crawlFrom(@Nullable URI uri) {
+        if (Objects.isNull(uri)) {
+            return Multi.createFrom().empty();
+        }
+
        CrawlerConfiguration crawlerConfig =
                 this.configurationProvider.toDomain();
 
-       // Resumption process ??
-
-       return this.scrapeFrom(uri, crawlerConfig.connectionTimeout())
+       return Uni.createFrom().item(() -> this.extractionCaching.hasNotBeenCrawled(uri))
+               .chain(crawlUri ->
+                       Boolean.TRUE.equals(crawlUri)
+                               ? scrapeFrom(uri, crawlerConfig.connectionTimeout())
+                               : Uni.createFrom().nullItem())
+               .onItem().call(() ->
+                       this.extractionCaching.cache(uri))
+               .onItem().call(
+                       this.extractionService::persist)
                .onItem().transformToMulti(extraction ->
-                       Multi.createFrom().iterable(extraction.getInnerUris()))
+                       Objects.nonNull(extraction) && Objects.nonNull(extraction.getInnerUris())
+                               ? Multi.createFrom().iterable(extraction.getInnerUris())
+                               : Multi.createFrom().empty())
                .onItem().transformToMultiAndMerge(this::crawlFrom);
     }
 
     public @Nonnull Uni<Extraction> scrapeFrom(@Nonnull URI uri, Duration timeout) {
-        return Uni.createFrom().item(this.processUri(uri))
-                .onSubscription()
-                .invoke(() -> {
-                    Pair<Boolean, Integer> connection =
-                            uriUtils.validateUriConnection(uri, timeout);
+        return Uni.createFrom().item(() -> uriUtils.validateUriConnection(uri, timeout))
+                .chain(connection -> {
+                    if (connection.getLeft()) {
+                        return Uni.createFrom()
+                                .item(() -> this.processUri(uri));
+                    }
 
-                    if (connection.getLeft())
-                        return;
+                    if (Objects.equals(connection.getRight(), 408) || Objects.equals(connection.getRight(), 504)) {
+                        return Uni.createFrom().failure(new UriConnectException(
+                                String.format("Error connecting to URL: %s. Will retry.", uri)));
+                    }
 
-                    if (Objects.equals(connection.getRight(), 408) || Objects.equals(connection.getRight(), 504))
-                        throw new UriConnectException(String.format("An error was encountered " +
-                                "while connecting to the specified URL: %s. Newer attempts will be made.", uri));
-
-                    throw new UnreachableUriException(String.format("An error was encountered while " +
-                            "connecting to the URI: %s. Connection will not be tried again.", connection.getRight()));
+                    return Uni.createFrom().failure(new UnreachableUriException(
+                            String.format("Error connecting to URI: %s. Status: %s. No retry.", uri, connection.getRight())));
                 })
-                .onFailure().transform(t -> {
-                    if (this.retryScrapeAttempt(t))
-                        return t;
-
-                    return new RuntimeException(String.format("An untreatable " +
-                            "error was encountered while scraping the URI: %s.", uri), t);
-                })
-                .onFailure().retry()
-                .withBackOff(Duration.ofSeconds(3), Duration.ofSeconds(10))
-                .atMost(3);
+                .onFailure(this::retryScrapeAttempt).retry()
+                    .withBackOff(Duration.ofSeconds(3), Duration.ofSeconds(10))
+                    .atMost(3)
+                .onFailure().transform(t -> new RuntimeException(
+                        String.format("An untreatable error was encountered while scraping the URI: %s.", uri), t));
     }
 
     protected @Nonnull Extraction processUri(@Nonnull URI uri) {
