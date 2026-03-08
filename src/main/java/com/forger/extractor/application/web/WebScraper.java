@@ -46,6 +46,12 @@ public class WebScraper {
 
     private static final String CONNECTION_REFERER = "http://www.google.com";
 
+    private static final Duration MAX_BACKOFF = Duration.ofSeconds(3);
+
+    private static final Duration MIN_BACKOFF = Duration.ofSeconds(10);
+
+    private static final Integer MAX_RETRIES = 3;
+
     private final ExtractionService extractionService;
 
     private final ExtractionCaching extractionCaching;
@@ -72,11 +78,11 @@ public class WebScraper {
     }
 
     public @Nonnull Multi<Void> crawlFrom(@Nullable URI uri) {
-        return this.crawlFrom(uri, new AtomicInteger(0));
+        return this.crawlFrom(uri, 1);
     }
 
     @SuppressWarnings("ReactiveStreamsUnusedPublisher")
-    private @Nonnull Multi<Void> crawlFrom(@Nullable URI uri, @Nonnull AtomicInteger crrDeepness) {
+    private @Nonnull Multi<Void> crawlFrom(@Nullable URI uri, Integer crrDeepness) {
         if (Objects.isNull(uri)) {
             return Multi.createFrom().empty();
         }
@@ -85,7 +91,7 @@ public class WebScraper {
         CrawlerConfiguration crawlerConfig =
                 this.configurationProvider.toDomain();
 
-        return Uni.createFrom().item(() -> this.hasValidDeepness(crrDeepness, crawlerConfig.domainDeepness()))
+        return Uni.createFrom().item(() ->this.hasDepth(crrDeepness, crawlerConfig.domainDepth()))
                 .chain(deepness ->
                         Boolean.FALSE.equals(deepness)
                                 ? Uni.createFrom().nullItem()
@@ -95,7 +101,7 @@ public class WebScraper {
                         Boolean.FALSE.equals(crawlUri)
                                 ? Uni.createFrom().nullItem()
                                 : Uni.createFrom().item(
-                                        this.hasValidDomainFollowing(uri, crawlerConfig.domainFollows())))
+                                        this.hasOutbound(uri, crawlerConfig.domainOutbound())))
                 .chain(crawlDomain ->
                         Boolean.TRUE.equals(crawlDomain)
                                 ? this.scrapeFrom(uri, crawlerConfig.connectionTimeout())
@@ -109,7 +115,7 @@ public class WebScraper {
                                 ? Multi.createFrom().iterable(extraction.getInnerUris())
                                 : Multi.createFrom().empty())
                 .onItem().transformToMultiAndMerge(uriToScrape ->
-                        this.crawlFrom(uriToScrape, crrDeepness));
+                        this.crawlFrom(uriToScrape, crrDeepness + 1));
     }
 
     protected @Nonnull Uni<Extraction> scrapeFrom(@Nonnull URI uri, Duration timeout) {
@@ -128,9 +134,9 @@ public class WebScraper {
                     return Uni.createFrom().failure(new UnreachableUriException(
                             String.format("Error connecting to URI: %s. Status: %s. No retry.", uri, connection.getRight())));
                 })
-                .onFailure(this::retryScrapeAttempt).retry()
-                    .withBackOff(Duration.ofSeconds(3), Duration.ofSeconds(10))
-                    .atMost(3)
+                .onFailure(this::shouldRetryScraping).retry()
+                    .withBackOff(MIN_BACKOFF, MAX_BACKOFF)
+                    .atMost(MAX_RETRIES)
                 .onFailure().transform(t -> new RuntimeException(
                         String.format("An untreatable error was encountered while scraping the URI: %s.", uri), t));
     }
@@ -139,14 +145,14 @@ public class WebScraper {
         Document document = this.connectTo(uri);
 
         Extraction.ExtractionBuilder
-                extractionBuilder = this.getDataFrom(document);
+                extractionBuilder = this.getContentFrom(document);
 
         extractionBuilder.innerUris(this.getUrisFrom(document));
 
         return extractionBuilder.build();
     }
 
-    protected @Nonnull Extraction.ExtractionBuilder getDataFrom(@Nonnull Document document) {
+    protected @Nonnull Extraction.ExtractionBuilder getContentFrom(@Nonnull Document document) {
         try {
             Elements metaOgTitle = document.select("meta[property=og:title]");
             String title = metaOgTitle.attr("content");
@@ -209,16 +215,16 @@ public class WebScraper {
         }
     }
 
-    protected @Nonnull Boolean hasValidDeepness(@Nonnull AtomicInteger crrDeepness, @Nullable Integer deepnessLimitation) {
-        if (deepnessLimitation == null) {
+    protected @Nonnull Boolean hasDepth(@Nonnull Integer crrDeepness, @Nullable Integer depth) {
+        if (depth == null) {
             return true;
         }
 
-        return crrDeepness.getAndIncrement() < deepnessLimitation;
+        return crrDeepness <= depth;
     }
 
-    protected @Nonnull Boolean hasValidDomainFollowing(@Nonnull URI targetUri, @Nullable Integer domainLimitation) {
-        if (domainLimitation == null) {
+    protected @Nonnull Boolean hasOutbound(@Nonnull URI targetUri, @Nullable Integer outbound) {
+        if (outbound == null) {
             return false;
         }
 
@@ -226,10 +232,10 @@ public class WebScraper {
                 .domainEquals(this.domain, targetUri);
 
         return equalDomain || this.domainCounter
-                .getAndIncrement() < domainLimitation;
+                .getAndIncrement() < outbound;
     }
 
-    protected @Nonnull Boolean retryScrapeAttempt(@Nonnull Throwable throwable) {
+    protected @Nonnull Boolean shouldRetryScraping(@Nonnull Throwable throwable) {
         return throwable instanceof UriConnectException;
     }
 }

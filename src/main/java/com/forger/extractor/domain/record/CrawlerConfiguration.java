@@ -5,6 +5,6 @@ import java.time.Duration;
 public record CrawlerConfiguration(
     Duration connectionTimeout,
     int connectionWorkers,
-    int domainFollows,
-    int domainDeepness
+    int domainOutbound,
+    int domainDepth
 ) {}

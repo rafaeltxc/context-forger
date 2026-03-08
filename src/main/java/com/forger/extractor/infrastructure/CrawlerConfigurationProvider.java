@@ -16,15 +16,15 @@ public class CrawlerConfigurationProvider {
     int connectionWorkers;
 
     @ConfigProperty(name = "forger.domain.follows")
-    int domainFollows;
+    int domainOutbound;
 
     @ConfigProperty(name = "forger.domain.deepness")
-    int domainDeepness;
+    int domainDepth;
 
     public CrawlerConfiguration toDomain() {
         Duration connectionTimeout = Duration.ofSeconds(this.connectionTimeout);
 
         return new CrawlerConfiguration(connectionTimeout,
-                this.connectionWorkers, this.domainFollows, this.domainDeepness);
+                this.connectionWorkers, this.domainOutbound, this.domainDepth);
     }
 }
