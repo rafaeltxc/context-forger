@@ -72,23 +72,24 @@ public class WebScraper {
             return Multi.createFrom().empty();
         }
 
-       CrawlerConfiguration crawlerConfig =
+        // TODO - REMOVE THIS TO OUTSIDE THE LOOP
+        CrawlerConfiguration crawlerConfig =
                 this.configurationProvider.toDomain();
 
-       return Uni.createFrom().item(() -> this.extractionCaching.hasNotBeenCrawled(uri))
-               .chain(crawlUri ->
-                       Boolean.TRUE.equals(crawlUri)
-                               ? scrapeFrom(uri, crawlerConfig.connectionTimeout())
-                               : Uni.createFrom().nullItem())
-               .onItem().call(() ->
-                       this.extractionCaching.cache(uri))
-               .onItem().call(
-                       this.extractionService::persist)
-               .onItem().transformToMulti(extraction ->
-                       Objects.nonNull(extraction) && Objects.nonNull(extraction.getInnerUris())
-                               ? Multi.createFrom().iterable(extraction.getInnerUris())
-                               : Multi.createFrom().empty())
-               .onItem().transformToMultiAndMerge(this::crawlFrom);
+        return Uni.createFrom().item(() -> this.extractionCaching.hasNotBeenCrawled(uri))
+                .chain(crawlUri ->
+                        Boolean.TRUE.equals(crawlUri)
+                                ? scrapeFrom(uri, crawlerConfig.connectionTimeout())
+                                : Uni.createFrom().nullItem())
+                .onItem().call(() ->
+                        this.extractionCaching.cache(uri))
+                .onItem().call(
+                        this.extractionService::persist)
+                .onItem().transformToMulti(extraction ->
+                        Objects.nonNull(extraction) && Objects.nonNull(extraction.getInnerUris())
+                                ? Multi.createFrom().iterable(extraction.getInnerUris())
+                                : Multi.createFrom().empty())
+                .onItem().transformToMultiAndMerge(this::crawlFrom);
     }
 
     public @Nonnull Uni<Extraction> scrapeFrom(@Nonnull URI uri, Duration timeout) {
