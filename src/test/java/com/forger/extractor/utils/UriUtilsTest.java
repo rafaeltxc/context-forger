@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.mockito.Mockito;
@@ -17,7 +18,7 @@ import org.mockito.Mockito;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
-import java.util.List;
+import java.util.Collection;
 
 import com.forger.tool.measurement.weight.TestWeight.FastTest;
 
@@ -28,7 +29,7 @@ public class UriUtilsTest extends AbstractNginxTestContainer {
     @Inject
     UriUtils uriUtils;
 
-    private static List<Pair<Boolean, String>> definedTestUrls() {
+    private static Collection<Pair<Boolean, String>> urlsProvider() {
         return ImmutableList.of(
             // ✅ Valid Absolute URLs
             Pair.of(true, "https://www.example-testing-domain.com/path/to/resource.html"),
@@ -60,7 +61,7 @@ public class UriUtilsTest extends AbstractNginxTestContainer {
     @Test
     @DisplayName("Check the total count of valid URIs")
     public void testTotalValidUris() {
-        List<Pair<Boolean, String>> urisList = definedTestUrls();
+        Collection<Pair<Boolean, String>> urisList = urlsProvider();
 
         int totalUris = (int) urisList.stream()
                 .filter((pair -> Boolean.TRUE.equals(pair.getLeft())))
@@ -76,7 +77,7 @@ public class UriUtilsTest extends AbstractNginxTestContainer {
     }
 
     @ParameterizedTest()
-    @MethodSource("definedTestUrls")
+    @MethodSource("urlsProvider")
     @DisplayName("Test valid and invalid URIs")
     public void testValidUri(Pair<Boolean, String> testPair) {
         Boolean isUriValid = this.uriUtils
@@ -125,5 +126,23 @@ public class UriUtilsTest extends AbstractNginxTestContainer {
 
         Assertions.assertEquals("java.net.ConnectException", exception.getMessage());
         Assertions.assertInstanceOf(IOException.class, exception.getCause());
+    }
+
+    static Collection<Arguments> domainsProvider() {
+        return ImmutableList.of(
+                Arguments.of(URI.create("http://example.com"), URI.create("http://example.com"), true),
+                Arguments.of(URI.create("http://example.com"), URI.create("https://example.com"), true),
+                Arguments.of(URI.create("http://example.com"), URI.create("http://sub.example.com"), false),
+                Arguments.of(URI.create("http://example.com"), URI.create("http://example.org"), false),
+                Arguments.of(URI.create("http://example.com"), URI.create("http://example.com/page"), true)
+        );
+    }
+
+    @ParameterizedTest()
+    @MethodSource("domainsProvider")
+    @DisplayName("Test equal and not equal domains")
+    public void testDomainsEqual(URI source, URI target, Boolean expected) {
+        Assertions.assertEquals(expected,
+                uriUtils.domainEquals(source, target));
     }
 }

@@ -18,6 +18,10 @@ import java.util.Objects;
 @ApplicationScoped
 public class UriUtils {
 
+    public @Nonnull Boolean domainEquals(@Nonnull URI source, @Nonnull URI target) {
+        return Objects.equals(source.getHost(), target.getHost());
+    }
+
     public @Nonnull Boolean validateUri(@Nullable String uri) {
         UrlValidator urlValidator = new
                 UrlValidator(UrlValidator.ALLOW_LOCAL_URLS);

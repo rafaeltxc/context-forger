@@ -28,6 +28,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -53,6 +54,10 @@ public class WebScraper {
 
     private final CrawlerConfigurationProvider configurationProvider;
 
+    private URI domain;
+
+    private AtomicInteger domainCounter;
+
     @Inject
     public WebScraper(
             ExtractionService extractionService,
@@ -66,8 +71,12 @@ public class WebScraper {
         this.uriUtils = uriUtils;
     }
 
-    @SuppressWarnings("ReactiveStreamsUnusedPublisher")
     public @Nonnull Multi<Void> crawlFrom(@Nullable URI uri) {
+        return this.crawlFrom(uri, new AtomicInteger(0));
+    }
+
+    @SuppressWarnings("ReactiveStreamsUnusedPublisher")
+    private @Nonnull Multi<Void> crawlFrom(@Nullable URI uri, @Nonnull AtomicInteger crrDeepness) {
         if (Objects.isNull(uri)) {
             return Multi.createFrom().empty();
         }
@@ -76,23 +85,34 @@ public class WebScraper {
         CrawlerConfiguration crawlerConfig =
                 this.configurationProvider.toDomain();
 
-        return Uni.createFrom().item(() -> this.extractionCaching.hasNotBeenCrawled(uri))
+        return Uni.createFrom().item(() -> this.hasValidDeepness(crrDeepness, crawlerConfig.domainDeepness()))
+                .chain(deepness ->
+                        Boolean.FALSE.equals(deepness)
+                                ? Uni.createFrom().nullItem()
+                                : Uni.createFrom().item(
+                                        this.extractionCaching.hasNotBeenCrawled(uri)))
                 .chain(crawlUri ->
-                        Boolean.TRUE.equals(crawlUri)
-                                ? scrapeFrom(uri, crawlerConfig.connectionTimeout())
+                        Boolean.FALSE.equals(crawlUri)
+                                ? Uni.createFrom().nullItem()
+                                : Uni.createFrom().item(
+                                        this.hasValidDomainFollowing(uri, crawlerConfig.domainFollows())))
+                .chain(crawlDomain ->
+                        Boolean.TRUE.equals(crawlDomain)
+                                ? this.scrapeFrom(uri, crawlerConfig.connectionTimeout())
                                 : Uni.createFrom().nullItem())
-                .onItem().call(() ->
+                .onItem().ifNotNull().call(() ->
                         this.extractionCaching.cache(uri))
-                .onItem().call(
+                .onItem().ifNotNull().call(
                         this.extractionService::persist)
                 .onItem().transformToMulti(extraction ->
                         Objects.nonNull(extraction) && Objects.nonNull(extraction.getInnerUris())
                                 ? Multi.createFrom().iterable(extraction.getInnerUris())
                                 : Multi.createFrom().empty())
-                .onItem().transformToMultiAndMerge(this::crawlFrom);
+                .onItem().transformToMultiAndMerge(uriToScrape ->
+                        this.crawlFrom(uriToScrape, crrDeepness));
     }
 
-    public @Nonnull Uni<Extraction> scrapeFrom(@Nonnull URI uri, Duration timeout) {
+    protected @Nonnull Uni<Extraction> scrapeFrom(@Nonnull URI uri, Duration timeout) {
         return Uni.createFrom().item(() -> uriUtils.validateUriConnection(uri, timeout))
                 .chain(connection -> {
                     if (connection.getLeft()) {
@@ -189,7 +209,27 @@ public class WebScraper {
         }
     }
 
-    private @Nonnull Boolean retryScrapeAttempt(@Nonnull Throwable throwable) {
+    protected @Nonnull Boolean hasValidDeepness(@Nonnull AtomicInteger crrDeepness, @Nullable Integer deepnessLimitation) {
+        if (deepnessLimitation == null) {
+            return true;
+        }
+
+        return crrDeepness.getAndIncrement() < deepnessLimitation;
+    }
+
+    protected @Nonnull Boolean hasValidDomainFollowing(@Nonnull URI targetUri, @Nullable Integer domainLimitation) {
+        if (domainLimitation == null) {
+            return false;
+        }
+
+        Boolean equalDomain = this.uriUtils
+                .domainEquals(this.domain, targetUri);
+
+        return equalDomain || this.domainCounter
+                .getAndIncrement() < domainLimitation;
+    }
+
+    protected @Nonnull Boolean retryScrapeAttempt(@Nonnull Throwable throwable) {
         return throwable instanceof UriConnectException;
     }
 }
