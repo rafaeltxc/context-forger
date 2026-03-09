@@ -205,6 +205,12 @@ public class WebExtactor {
         }
     }
 
+    /**
+     * Connect to a received URI.
+     *
+     * @param uri URI to be connected to.
+     * @return Page connection.
+     */
     protected @Nonnull Document connectTo(@Nonnull URI uri) {
         try {
             Connection connection = Jsoup.connect(uri.toString())
@@ -219,6 +225,21 @@ public class WebExtactor {
         }
     }
 
+    /**
+     * Validates if it's possible to continue on the crawling process, based on how many
+     * URIs were crawled.
+     * <p>
+     * Base the validation in the current crawling depth (how many times the crawler went to
+     * the next URI in the page), if its lesser or equal to the configured depth
+     * limitation.
+     * <p>
+     * If the depth limitation is not configured, it will allow the process to continue
+     * indefinitely.
+     *
+     * @param crrDepth   Current thread crawling depth.
+     * @param depthLimit Depth limitation.
+     * @return If process can continue to the next URI iteration.
+     */
     protected @Nonnull Boolean hasDepth(
             @Nonnull Integer crrDepth,
             @Nullable Integer depthLimit
@@ -230,6 +251,21 @@ public class WebExtactor {
         return crrDepth <= depthLimit;
     }
 
+    /**
+     * Validates if following to a new domain outside the base crawling URI is possible.
+     * <p>
+     * Base the validation on the crawler configured limitation. The current outbound should
+     * be lesser or equal to the delimited outbound.
+     * <p>
+     * If the limitation is not set, it will not be allowed to the crawler to go outside the
+     * original domain.
+     *
+     * @param sourceUri     Base for domain check.
+     * @param targetUri     Target to validate domain.
+     * @param crrOutbound   Current domain outbound on thread.
+     * @param outboundLimit Outbound limitation.
+     * @return If following to a next outside domain is permitted.
+     */
     protected @Nonnull Boolean hasOutbound(
             @Nonnull URI sourceUri,
             @Nonnull URI targetUri,
@@ -247,6 +283,12 @@ public class WebExtactor {
                 .getAndIncrement() < outboundLimit;
     }
 
+    /**
+     * Check if process should be retried based on the exception type.
+     *
+     * @param throwable To validate exception type.
+     * @return If exception is retriable.
+     */
     protected @Nonnull Boolean shouldRetryScraping(@Nonnull Throwable throwable) {
         return throwable instanceof UriConnectException;
     }
