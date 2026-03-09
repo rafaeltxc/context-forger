@@ -59,7 +59,7 @@ public class WebExtactor {
 
     private final UriUtils uriUtils;
 
-    private final CrawlerConfigurationProvider configurationProvider;
+    private final CrawlerConfiguration crawlerConfiguration;
 
     @Inject
     public WebExtactor(
@@ -70,8 +70,10 @@ public class WebExtactor {
     ) {
         this.extractionService = extractionService;
         this.extractionCaching = extractionCaching;
-        this.configurationProvider = configurationProvider;
         this.uriUtils = uriUtils;
+
+        this.crawlerConfiguration =
+                configurationProvider.toDomain();
     }
 
     @SuppressWarnings("ReactiveStreamsUnusedPublisher")
@@ -92,11 +94,7 @@ public class WebExtactor {
             return Multi.createFrom().empty();
         }
 
-        // TODO - REMOVE THIS TO OUTSIDE THE LOOP
-        CrawlerConfiguration crawlerConfig =
-                this.configurationProvider.toDomain();
-
-        return Uni.createFrom().item(() ->this.hasDepth(crrDepth, crawlerConfig.domainDepth()))
+        return Uni.createFrom().item(() -> this.hasDepth(crrDepth, crawlerConfiguration.domainDepth()))
                 .chain(depth ->
                         Boolean.FALSE.equals(depth)
                                 ? Uni.createFrom().nullItem()
@@ -107,10 +105,10 @@ public class WebExtactor {
                                 ? Uni.createFrom().nullItem()
                                 : Uni.createFrom().item(
                                         this.hasOutbound(uri, baseDomain,
-                                                crrOutbound, crawlerConfig.domainOutbound())))
+                                                crrOutbound, crawlerConfiguration.domainOutbound())))
                 .chain(crawlDomain ->
                         Boolean.TRUE.equals(crawlDomain)
-                                ? this.scrapeFrom(uri, crawlerConfig.connectionTimeout())
+                                ? this.scrapeFrom(uri, crawlerConfiguration.connectionTimeout())
                                 : Uni.createFrom().nullItem())
                 .onItem().ifNotNull().call(() ->
                         this.extractionCaching.cache(uri))
