@@ -9,6 +9,7 @@ import com.forger.extractor.exception.WebContentExtractionException;
 import com.forger.extractor.exception.WebUriExtractionException;
 import com.forger.extractor.infrastructure.CrawlerConfigurationProvider;
 import com.forger.extractor.service.ExtractionService;
+import com.forger.extractor.utils.ConnectionUtils;
 import com.forger.extractor.utils.UriUtils;
 import io.quarkus.logging.Log;
 import io.smallrye.mutiny.Multi;
@@ -17,13 +18,10 @@ import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jsoup.Connection;
-import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
-import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Objects;
@@ -42,11 +40,6 @@ import java.util.stream.Collectors;
 @ApplicationScoped
 public class WebExtactor {
 
-    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 11.0; " +
-            "Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6998.166 Safari/537.36";
-
-    private static final String CONNECTION_REFERER = "http://www.google.com";
-
     private static final Duration MAX_BACKOFF = Duration.ofSeconds(3);
 
     private static final Duration MIN_BACKOFF = Duration.ofSeconds(10);
@@ -59,6 +52,8 @@ public class WebExtactor {
 
     private final UriUtils uriUtils;
 
+    private final ConnectionUtils connectionUtils;
+
     private final CrawlerConfiguration crawlerConfiguration;
 
     @Inject
@@ -66,18 +61,23 @@ public class WebExtactor {
             ExtractionService extractionService,
             ExtractionCaching extractionCaching,
             CrawlerConfigurationProvider configurationProvider,
-            UriUtils uriUtils
+            UriUtils uriUtils,
+            ConnectionUtils connectionUtils
     ) {
         this.extractionService = extractionService;
         this.extractionCaching = extractionCaching;
         this.uriUtils = uriUtils;
+        this.connectionUtils = connectionUtils;
 
         this.crawlerConfiguration =
                 configurationProvider.toDomain();
     }
 
     @SuppressWarnings("ReactiveStreamsUnusedPublisher")
-    public @Nonnull Multi<Void> crawlFrom(@Nonnull UUID jobUuid, @Nonnull URI uri) {
+    public @Nonnull Multi<Void> crawlFrom(
+            @Nonnull UUID jobUuid,
+            @Nonnull URI uri
+    ) {
         return this.extractionCaching.cache(jobUuid.toString(), uri)
                 .onItem().transformToMulti(ignoredVoid ->
                         this.crawlFrom(uri, uri, 1, new AtomicInteger(0)));
@@ -146,7 +146,7 @@ public class WebExtactor {
     }
 
     protected @Nonnull Extraction processUri(@Nonnull URI uri) {
-        Document document = this.connectTo(uri);
+        Document document = this.connectionUtils.connectTo(uri);
 
         Extraction.ExtractionBuilder
                 extractionBuilder = this.getContentFrom(document);
@@ -202,26 +202,6 @@ public class WebExtactor {
             Log.errorf("An error was encountered while scraping " +
                     "document from URL: %s, for its links.", document.baseUri(), e);
             throw new WebUriExtractionException(e);
-        }
-    }
-
-    /**
-     * Connect to a received URI.
-     *
-     * @param uri URI to be connected to.
-     * @return Page connection.
-     */
-    protected @Nonnull Document connectTo(@Nonnull URI uri) {
-        try {
-            Connection connection = Jsoup.connect(uri.toString())
-                    .userAgent(USER_AGENT)
-                    .referrer(CONNECTION_REFERER);
-
-            return connection.get();
-        } catch (IOException e) {
-            Log.errorf("An error was encountered while connecting " +
-                    "to the specified URL: %s.", uri.toString(), e);
-            throw new UriConnectException(e);
         }
     }
 
