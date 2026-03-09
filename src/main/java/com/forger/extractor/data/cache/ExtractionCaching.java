@@ -18,6 +18,15 @@ public class ExtractionCaching {
         return null;
     }
 
+    public Uni<Void> cache(String key, URI uri) {
+        if (Objects.isNull(uri)) {
+            return Uni.createFrom().voidItem();
+        }
+
+        // TODO - COMPLETE FUNCTION LOGIC
+        return null;
+    }
+
     public Boolean hasNotBeenCrawled(URI uri) {
         return null;
     }

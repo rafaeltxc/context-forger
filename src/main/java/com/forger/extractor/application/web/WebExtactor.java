@@ -28,6 +28,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -39,7 +40,7 @@ import java.util.stream.Collectors;
  * content scrape. A synchronous code may be run subscribing Mutiny with only one instance.
  */
 @ApplicationScoped
-public class WebScraper {
+public class WebExtactor {
 
     private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 11.0; " +
             "Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6998.166 Safari/537.36";
@@ -60,12 +61,8 @@ public class WebScraper {
 
     private final CrawlerConfigurationProvider configurationProvider;
 
-    private URI domain;
-
-    private AtomicInteger domainCounter;
-
     @Inject
-    public WebScraper(
+    public WebExtactor(
             ExtractionService extractionService,
             ExtractionCaching extractionCaching,
             CrawlerConfigurationProvider configurationProvider,
@@ -77,12 +74,20 @@ public class WebScraper {
         this.uriUtils = uriUtils;
     }
 
-    public @Nonnull Multi<Void> crawlFrom(@Nullable URI uri) {
-        return this.crawlFrom(uri, 1);
+    @SuppressWarnings("ReactiveStreamsUnusedPublisher")
+    public @Nonnull Multi<Void> crawlFrom(@Nonnull UUID jobUuid, @Nonnull URI uri) {
+        return this.extractionCaching.cache(jobUuid.toString(), uri)
+                .onItem().transformToMulti(ignoredVoid ->
+                        this.crawlFrom(uri, uri, 1, new AtomicInteger(0)));
     }
 
     @SuppressWarnings("ReactiveStreamsUnusedPublisher")
-    private @Nonnull Multi<Void> crawlFrom(@Nullable URI uri, Integer crrDeepness) {
+    private @Nonnull Multi<Void> crawlFrom(
+            @Nonnull URI baseDomain,
+            @Nullable URI uri,
+            @Nonnull Integer crrDepth,
+            @Nonnull AtomicInteger crrOutbound
+    ) {
         if (Objects.isNull(uri)) {
             return Multi.createFrom().empty();
         }
@@ -91,9 +96,9 @@ public class WebScraper {
         CrawlerConfiguration crawlerConfig =
                 this.configurationProvider.toDomain();
 
-        return Uni.createFrom().item(() ->this.hasDepth(crrDeepness, crawlerConfig.domainDepth()))
-                .chain(deepness ->
-                        Boolean.FALSE.equals(deepness)
+        return Uni.createFrom().item(() ->this.hasDepth(crrDepth, crawlerConfig.domainDepth()))
+                .chain(depth ->
+                        Boolean.FALSE.equals(depth)
                                 ? Uni.createFrom().nullItem()
                                 : Uni.createFrom().item(
                                         this.extractionCaching.hasNotBeenCrawled(uri)))
@@ -101,7 +106,8 @@ public class WebScraper {
                         Boolean.FALSE.equals(crawlUri)
                                 ? Uni.createFrom().nullItem()
                                 : Uni.createFrom().item(
-                                        this.hasOutbound(uri, crawlerConfig.domainOutbound())))
+                                        this.hasOutbound(uri, baseDomain,
+                                                crrOutbound, crawlerConfig.domainOutbound())))
                 .chain(crawlDomain ->
                         Boolean.TRUE.equals(crawlDomain)
                                 ? this.scrapeFrom(uri, crawlerConfig.connectionTimeout())
@@ -115,7 +121,7 @@ public class WebScraper {
                                 ? Multi.createFrom().iterable(extraction.getInnerUris())
                                 : Multi.createFrom().empty())
                 .onItem().transformToMultiAndMerge(uriToScrape ->
-                        this.crawlFrom(uriToScrape, crrDeepness + 1));
+                        this.crawlFrom(baseDomain, uriToScrape, crrDepth + 1, crrOutbound));
     }
 
     protected @Nonnull Uni<Extraction> scrapeFrom(@Nonnull URI uri, Duration timeout) {
@@ -215,24 +221,32 @@ public class WebScraper {
         }
     }
 
-    protected @Nonnull Boolean hasDepth(@Nonnull Integer crrDeepness, @Nullable Integer depth) {
-        if (depth == null) {
+    protected @Nonnull Boolean hasDepth(
+            @Nonnull Integer crrDepth,
+            @Nullable Integer depthLimit
+    ) {
+        if (depthLimit == null) {
             return true;
         }
 
-        return crrDeepness <= depth;
+        return crrDepth <= depthLimit;
     }
 
-    protected @Nonnull Boolean hasOutbound(@Nonnull URI targetUri, @Nullable Integer outbound) {
-        if (outbound == null) {
+    protected @Nonnull Boolean hasOutbound(
+            @Nonnull URI sourceUri,
+            @Nonnull URI targetUri,
+            @Nonnull AtomicInteger crrOutbound,
+            @Nullable Integer outboundLimit
+    ) {
+        if (outboundLimit == null) {
             return false;
         }
 
         Boolean equalDomain = this.uriUtils
-                .domainEquals(this.domain, targetUri);
+                .domainEquals(sourceUri, targetUri);
 
-        return equalDomain || this.domainCounter
-                .getAndIncrement() < outbound;
+        return equalDomain || crrOutbound
+                .getAndIncrement() < outboundLimit;
     }
 
     protected @Nonnull Boolean shouldRetryScraping(@Nonnull Throwable throwable) {
