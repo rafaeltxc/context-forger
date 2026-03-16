@@ -1,17 +1,14 @@
-package com.forger.extractor.application.web;
+package com.forger.extractor.application.web.scrape;
 
+import com.forger.extractor.application.content.PageContentProcessor;
 import com.forger.extractor.data.cache.ExtractionCaching;
 import com.forger.extractor.domain.model.Extraction;
 import com.forger.extractor.domain.record.CrawlerConfiguration;
-import com.forger.extractor.exception.UnreachableUriException;
-import com.forger.extractor.exception.UriConnectException;
-import com.forger.extractor.exception.WebContentExtractionException;
-import com.forger.extractor.exception.WebUriExtractionException;
+import com.forger.extractor.exception.*;
 import com.forger.extractor.infrastructure.CrawlerConfigurationProvider;
 import com.forger.extractor.service.ExtractionService;
 import com.forger.extractor.utils.ConnectionUtils;
 import com.forger.extractor.utils.UriUtils;
-import io.quarkus.logging.Log;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 import jakarta.annotation.Nonnull;
@@ -19,16 +16,12 @@ import jakarta.annotation.Nullable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
 
 import java.net.URI;
 import java.time.Duration;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 /**
  * Web page scraper class, with the objective gathering all the needed data for the context
@@ -38,13 +31,15 @@ import java.util.stream.Collectors;
  * content scrape. A synchronous code may be run subscribing Mutiny with only one instance.
  */
 @ApplicationScoped
-public class WebExtactor {
+public class PageExtactor {
 
     private static final Duration MAX_BACKOFF = Duration.ofSeconds(3);
 
     private static final Duration MIN_BACKOFF = Duration.ofSeconds(10);
 
     private static final Integer MAX_RETRIES = 3;
+
+    private final PageContentProcessor pageContentProcessor;
 
     private final ExtractionService extractionService;
 
@@ -57,13 +52,15 @@ public class WebExtactor {
     private final CrawlerConfiguration crawlerConfiguration;
 
     @Inject
-    public WebExtactor(
+    public PageExtactor(
+            PageContentProcessor pageContentProcessor,
             ExtractionService extractionService,
             ExtractionCaching extractionCaching,
             CrawlerConfigurationProvider configurationProvider,
             UriUtils uriUtils,
             ConnectionUtils connectionUtils
     ) {
+        this.pageContentProcessor = pageContentProcessor;
         this.extractionService = extractionService;
         this.extractionCaching = extractionCaching;
         this.uriUtils = uriUtils;
@@ -110,15 +107,17 @@ public class WebExtactor {
                         Boolean.TRUE.equals(crawlDomain)
                                 ? this.scrapeFrom(uri, crawlerConfiguration.connectionTimeout())
                                 : Uni.createFrom().nullItem())
-                .onItem().ifNotNull().call(() ->
-                        this.extractionCaching.cache(uri))
-                .onItem().ifNotNull().call(
-                        this.extractionService::persist)
-                .onItem().transformToMulti(extraction ->
+                .onItem()
+                    .ifNotNull().call(() -> this.extractionCaching.cache(uri))
+                .onItem()
+                    .ifNotNull().call(this.extractionService::persist)
+                .onItem()
+                    .transformToMulti(extraction ->
                         Objects.nonNull(extraction) && Objects.nonNull(extraction.getInnerUris())
                                 ? Multi.createFrom().iterable(extraction.getInnerUris())
                                 : Multi.createFrom().empty())
-                .onItem().transformToMultiAndMerge(uriToScrape ->
+                .onItem()
+                    .transformToMultiAndMerge(uriToScrape ->
                         this.crawlFrom(baseDomain, uriToScrape, crrDepth + 1, crrOutbound));
     }
 
@@ -130,79 +129,50 @@ public class WebExtactor {
                                 .item(() -> this.processUri(uri));
                     }
 
-                    if (Objects.equals(connection.getRight(), 408) || Objects.equals(connection.getRight(), 504)) {
+                    int statusCode = connection.getRight();
+
+                    if (statusCode == 403 || statusCode == 503 || statusCode == 429) {
+                        return Uni.createFrom().failure(new BotDetectedException(
+                                String.format("Erro connecting to URL: %s with status code: %s. " +
+                                        "Potential Bot Challenge detected, process will be escalated to playwright.", uri, statusCode)));
+                    }
+
+                    if (Objects.equals(statusCode, 408) || Objects.equals(statusCode, 504)) {
                         return Uni.createFrom().failure(new UriConnectException(
                                 String.format("Error connecting to URL: %s. Will retry.", uri)));
                     }
 
                     return Uni.createFrom().failure(new UnreachableUriException(
-                            String.format("Error connecting to URI: %s. Status: %s. No retry.", uri, connection.getRight())));
+                            String.format("Error connecting to URI: %s. Status: %s. No retry.", uri, statusCode)));
                 })
+                .onFailure(this::shouldEscalateProcess)
+                    .recoverWithItem(() -> this.processJsLoadedUri(uri))
                 .onFailure(this::shouldRetryScraping).retry()
                     .withBackOff(MIN_BACKOFF, MAX_BACKOFF)
                     .atMost(MAX_RETRIES)
-                .onFailure().transform(t -> new RuntimeException(
-                        String.format("An untreatable error was encountered while scraping the URI: %s.", uri), t));
+                .onFailure()
+                    .transform(throwable -> new RuntimeException(
+                        String.format("An untreatable error was encountered while scraping the URI: %s.", uri), throwable));
     }
 
     protected @Nonnull Extraction processUri(@Nonnull URI uri) {
         Document document = this.connectionUtils.connectTo(uri);
 
-        Extraction.ExtractionBuilder
-                extractionBuilder = this.getContentFrom(document);
+        if (this.pageContentProcessor.hasJsLoadedContent(document)) {
+            return processJsLoadedUri(uri);
+        }
 
-        extractionBuilder.innerUris(this.getUrisFrom(document));
+        Extraction.ExtractionBuilder extractionBuilder =
+                this.pageContentProcessor.getContentFrom(document);
+
+        extractionBuilder.innerUris(
+                this.pageContentProcessor.getUrisFrom(document));
 
         return extractionBuilder.build();
     }
 
-    protected @Nonnull Extraction.ExtractionBuilder getContentFrom(@Nonnull Document document) {
-        try {
-            Elements metaOgTitle = document.select("meta[property=og:title]");
-            String title = metaOgTitle.attr("content");
-
-            Elements metaOgDescription = document.select("meta[property=og:description]");
-            String description = metaOgDescription.attr("content");
-
-            Element documentBody = document.body();
-            String bodyHtml = documentBody.html();
-
-            return Extraction.builder()
-                    .title(title)
-                    .content(bodyHtml)
-                    .uri(URI.create(document.baseUri()))
-                    .description(description);
-        } catch (Exception e) {
-            Log.errorf("An error was encountered while " +
-                    "scraping document from URL: %s, for its data.", document.baseUri(), e);
-            throw new WebContentExtractionException(e);
-        }
-    }
-
-    protected @Nonnull Set<URI> getUrisFrom(@Nonnull Document document) {
-        try {
-            Elements innerUrls = document.select("a");
-
-            return innerUrls.stream()
-                    .map(url -> url.absUrl("href"))
-                    .filter(url -> !url.isEmpty())
-                    .filter(url -> url.startsWith("http://") || url.startsWith("https://"))
-                    .map(url -> {
-                        try {
-                            return URI.create(url);
-                        } catch (IllegalArgumentException e) {
-                            Log.errorf("Ivalid URL encountered during " +
-                                    "document scrape. URL will be dropped: %s.", url, e);
-                            return null;
-                        }
-                    })
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toSet());
-        } catch (Exception e) {
-            Log.errorf("An error was encountered while scraping " +
-                    "document from URL: %s, for its links.", document.baseUri(), e);
-            throw new WebUriExtractionException(e);
-        }
+    protected @Nonnull Extraction processJsLoadedUri(@Nonnull URI uri) {
+        return null;
     }
 
     /**
@@ -261,6 +231,16 @@ public class WebExtactor {
 
         return equalDomain || crrOutbound
                 .getAndIncrement() < outboundLimit;
+    }
+
+    /**
+     * Check if process should be escalated do playwright.
+     *
+     * @param throwable To validate exception type.
+     * @return If process should be escalated.
+     */
+    protected @Nonnull Boolean shouldEscalateProcess(@Nonnull Throwable throwable) {
+        return throwable instanceof BotDetectedException;
     }
 
     /**

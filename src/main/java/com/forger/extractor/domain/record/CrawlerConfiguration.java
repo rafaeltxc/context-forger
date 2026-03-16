@@ -6,5 +6,4 @@ public record CrawlerConfiguration(
     Duration connectionTimeout,
     int connectionWorkers,
     int domainOutbound,
-    int domainDepth
-) {}
+    int domainDepth) { }
