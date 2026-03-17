@@ -3,7 +3,7 @@ package com.forger.extractor.application.web.scrape;
 import com.forger.extractor.application.content.PageContentProcessor;
 import com.forger.extractor.data.cache.ExtractionCaching;
 import com.forger.extractor.domain.model.Extraction;
-import com.forger.extractor.domain.record.CrawlerConfiguration;
+import com.forger.extractor.domain.record.configuration.CrawlerConfiguration;
 import com.forger.extractor.exception.*;
 import com.forger.extractor.infrastructure.CrawlerConfigurationProvider;
 import com.forger.extractor.service.ExtractionService;

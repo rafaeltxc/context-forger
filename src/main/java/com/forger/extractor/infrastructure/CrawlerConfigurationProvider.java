@@ -1,6 +1,6 @@
 package com.forger.extractor.infrastructure;
 
-import com.forger.extractor.domain.record.CrawlerConfiguration;
+import com.forger.extractor.domain.record.configuration.CrawlerConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
