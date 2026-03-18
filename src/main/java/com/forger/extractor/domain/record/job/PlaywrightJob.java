@@ -6,11 +6,11 @@ import com.microsoft.playwright.BrowserContext;
 import java.net.URI;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 
 public record PlaywrightJob(
         UUID uuid,
-        BiConsumer<URI, BrowserContext> job,
+        BiFunction<URI, BrowserContext, Extraction> job,
         URI uri,
         CompletableFuture<Extraction> future
 ) {

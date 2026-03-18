@@ -143,7 +143,7 @@ public class PageExtactor {
                     }
 
                     return Uni.createFrom().failure(new UnreachableUriException(
-                            String.format("Error connecting to URI: %s. Status: %s. No retry.", uri, statusCode)));
+                            String.format("Error connecting to URL: %s. Status: %s. No retry.", uri, statusCode)));
                 })
                 .onFailure(this::shouldEscalateProcess)
                     .recoverWithItem(() -> this.processJsLoadedUri(uri))
@@ -152,7 +152,7 @@ public class PageExtactor {
                     .atMost(MAX_RETRIES)
                 .onFailure()
                     .transform(throwable -> new RuntimeException(
-                        String.format("An untreatable error was encountered while scraping the URI: %s.", uri), throwable));
+                        String.format("An untreatable error was encountered while scraping the URL: %s.", uri), throwable));
     }
 
     protected @Nonnull Extraction processUri(@Nonnull URI uri) {

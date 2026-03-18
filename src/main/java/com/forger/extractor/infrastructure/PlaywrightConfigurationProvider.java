@@ -3,47 +3,50 @@ package com.forger.extractor.infrastructure;
 import com.forger.extractor.domain.model.Extraction;
 import com.forger.extractor.domain.record.configuration.CrawlerConfiguration;
 import com.forger.extractor.domain.record.job.PlaywrightJob;
+import com.forger.extractor.exception.WebContentExtractionException;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Playwright;
+import io.quarkus.logging.Log;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.LinkedBlockingDeque;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.*;
 import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 
 @ApplicationScoped
 public class PlaywrightConfigurationProvider {
 
-    private final static Integer MAX_OPEN_PAGES = 10;
+    private static final Duration QUEUE_TIMEOUT = Duration.ofSeconds(30);
 
-    private final static Integer MAX_OPEN_CONTEXTS = 5;
+    private static final Integer MAX_OPEN_PAGES = 10;
+
+    private static final Integer MAX_OPEN_CONTEXTS = 5;
 
     private final CrawlerConfigurationProvider crawlerConfigurationProvider;
 
-    protected LinkedBlockingDeque<PlaywrightJob> jobs;
+    protected LinkedBlockingQueue<PlaywrightJob> jobs;
 
     protected List<Thread> threads;
 
     public PlaywrightConfigurationProvider(CrawlerConfigurationProvider crawlerConfigurationProvider) {
         this.crawlerConfigurationProvider = crawlerConfigurationProvider;
 
-        this.jobs = new LinkedBlockingDeque<>();
+        this.jobs = new LinkedBlockingQueue<>();
     }
 
-    public Extraction provide(URI uri, BiConsumer<URI, BrowserContext> job) {
+    public Extraction provide(URI uri, BiFunction<URI, BrowserContext, Extraction> job) {
         this.initializeContext();
 
         UUID uuid = UUID.randomUUID();
 
-        CompletableFuture<Extraction> future =new CompletableFuture<>();
+        CompletableFuture<Extraction> future = new CompletableFuture<>();
 
         PlaywrightJob playwrightJob =
                 new PlaywrightJob(uuid, job, uri, future);
@@ -81,6 +84,10 @@ public class PlaywrightConfigurationProvider {
 
         private final List<Browser> browsers;
 
+        private final List<PlaywrightJob> takenJobs;
+
+        private final List<PlaywrightJob> defectiveJobs;
+
         private final Semaphore semaphore;
 
         @PreDestroy
@@ -95,7 +102,10 @@ public class PlaywrightConfigurationProvider {
                     Playwright.create();
             this.browsers =
                     new CopyOnWriteArrayList<>();
-
+            this.takenJobs =
+                    new CopyOnWriteArrayList<>();
+            this.defectiveJobs =
+                    new CopyOnWriteArrayList<>();
             this.semaphore =
                     new Semaphore(MAX_OPEN_PAGES * MAX_OPEN_CONTEXTS);
         }
@@ -104,15 +114,57 @@ public class PlaywrightConfigurationProvider {
         public void run() {
             try {
                 while (!Thread.currentThread().isInterrupted()) {
-                    this.processFrom(jobs.take());
+                    PlaywrightJob job = jobs.poll(
+                            QUEUE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+
+                    if (Objects.isNull(job)) {
+                        break;
+                    }
+
+                    this.takenJobs.add(job);
+
+                    CompletableFuture.runAsync(() -> {
+                        try {
+                            this.processFrom(job);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    });
                 }
             } catch (InterruptedException e) {
-                throw new RuntimeException(e);
+                Thread.currentThread().interrupt();
+            } catch (Exception e) {
+
+            } finally {
+
             }
         }
 
         private void processFrom(PlaywrightJob applier) throws InterruptedException {
-            applier.job().accept(applier.uri(), this.contextFrom(this.playwright, this.browsers));
+            try {
+                Extraction extraction = applier.job().apply(
+                        applier.uri(), this.contextFrom(this.playwright, this.browsers));
+
+                applier.future()
+                        .complete(extraction);
+
+                this.takenJobs
+                        .remove(applier);
+            } catch (WebContentExtractionException e) {
+                Log.errorf("An unexpected error was caught scraping " +
+                        "the URL: %s. URL will no be retried", applier.uri());
+
+                this.takenJobs
+                        .remove(applier);
+                this.defectiveJobs
+                        .add(applier);
+
+                throw new RuntimeException(e);
+            } catch (Exception e) {
+                Log.errorf("A general error was caught scraping the " +
+                        "URL: %s. Jobs will be saved for retrying.", applier.uri());
+                throw new RuntimeException(e);
+            }
         }
 
         private BrowserContext contextFrom(
@@ -138,9 +190,8 @@ public class PlaywrightConfigurationProvider {
             }
 
             // We should not be here, the error will be silently exposed and fallback.
-
-            // TODO - Fallback to scrape wrongly positioned page, not lost data.
-            return null;
+            throw new IllegalStateException("Running threads " +
+                    "were not hold by the logic gate. Problematic code logic.");
         }
 
         private BrowserContext hasAvailableContext(Browser browser) {
