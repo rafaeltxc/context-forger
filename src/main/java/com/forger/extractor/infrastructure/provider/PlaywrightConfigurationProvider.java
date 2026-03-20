@@ -1,9 +1,9 @@
-package com.forger.extractor.infrastructure;
+package com.forger.extractor.infrastructure.provider;
 
 import com.forger.extractor.domain.model.Extraction;
 import com.forger.extractor.domain.record.configuration.CrawlerConfiguration;
 import com.forger.extractor.domain.record.job.PlaywrightJob;
-import com.forger.extractor.exception.WebContentExtractionException;
+import com.forger.extractor.utils.ThreadUtils;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Playwright;
@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.*;
-import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 
 @ApplicationScoped
@@ -31,12 +30,18 @@ public class PlaywrightConfigurationProvider {
 
     private final CrawlerConfigurationProvider crawlerConfigurationProvider;
 
+    private final ThreadUtils threadUtils;
+
     protected LinkedBlockingQueue<PlaywrightJob> jobs;
 
     protected List<Thread> threads;
 
-    public PlaywrightConfigurationProvider(CrawlerConfigurationProvider crawlerConfigurationProvider) {
+    public PlaywrightConfigurationProvider(
+            CrawlerConfigurationProvider crawlerConfigurationProvider,
+            ThreadUtils threadUtils
+    ) {
         this.crawlerConfigurationProvider = crawlerConfigurationProvider;
+        this.threadUtils = threadUtils;
 
         this.jobs = new LinkedBlockingQueue<>();
     }
@@ -70,15 +75,16 @@ public class PlaywrightConfigurationProvider {
                 : 1;
 
         for (int i = 0; i < totalWorkers; i++) {
-            this.threads.add(
-                    Thread.ofPlatform()
-                            .name(String.format("PlaywrightJob-%d", i))
-                            // TODO - Create uncaught exception handler to fallback
-                            .start(new ConfigurationProviderRunner()));
+            this.threads.add(Thread.ofPlatform()
+                    .name(String.format("PlaywrightJob-%d", i))
+                    // TODO - Create uncaught exception handler to fallback
+                    .start(new ConfigurationProviderRunner()));
         }
     }
 
     private final class ConfigurationProviderRunner implements Runnable {
+
+        private final ThreadPoolExecutor executor;
 
         private final Playwright playwright;
 
@@ -95,9 +101,13 @@ public class PlaywrightConfigurationProvider {
             this.browsers
                     .forEach(Browser::close);
             this.playwright.close();
+
+            this.executor.shutdown();
         }
 
         public ConfigurationProviderRunner() {
+            this.executor = threadUtils.getExecutor(Thread.currentThread().getName() + "-RUNNER-%d",
+                    1, MAX_OPEN_PAGES * MAX_OPEN_CONTEXTS, Duration.ofSeconds(20));
             this.playwright =
                     Playwright.create();
             this.browsers =
@@ -129,14 +139,13 @@ public class PlaywrightConfigurationProvider {
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         }
-                    });
+                    }, this.executor);
                 }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
             } catch (Exception e) {
-
+                Log.errorf("Process terminated unexpectedly " +
+                        "while scraping page with Playwright.", e);
             } finally {
-
+                // TODO - Thread fallback for failed jobs.
             }
         }
 
@@ -150,20 +159,14 @@ public class PlaywrightConfigurationProvider {
 
                 this.takenJobs
                         .remove(applier);
-            } catch (WebContentExtractionException e) {
-                Log.errorf("An unexpected error was caught scraping " +
-                        "the URL: %s. URL will no be retried", applier.uri());
+            } catch (Exception e) {
+                Log.errorf("An error was caught scraping the " +
+                        "URL: %s. Jobs will be saved for retrying.", applier.uri());
 
                 this.takenJobs
                         .remove(applier);
                 this.defectiveJobs
                         .add(applier);
-
-                throw new RuntimeException(e);
-            } catch (Exception e) {
-                Log.errorf("A general error was caught scraping the " +
-                        "URL: %s. Jobs will be saved for retrying.", applier.uri());
-                throw new RuntimeException(e);
             }
         }
 

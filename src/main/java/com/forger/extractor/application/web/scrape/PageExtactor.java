@@ -5,7 +5,7 @@ import com.forger.extractor.data.cache.ExtractionCaching;
 import com.forger.extractor.domain.model.Extraction;
 import com.forger.extractor.domain.record.configuration.CrawlerConfiguration;
 import com.forger.extractor.exception.*;
-import com.forger.extractor.infrastructure.CrawlerConfigurationProvider;
+import com.forger.extractor.infrastructure.provider.CrawlerConfigurationProvider;
 import com.forger.extractor.service.ExtractionService;
 import com.forger.extractor.utils.ConnectionUtils;
 import com.forger.extractor.utils.UriUtils;

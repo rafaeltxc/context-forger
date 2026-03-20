@@ -1,4 +1,4 @@
-package com.forger.extractor.infrastructure;
+package com.forger.extractor.infrastructure.provider;
 
 import com.forger.extractor.domain.record.configuration.CrawlerConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
