@@ -9,6 +9,11 @@ import java.util.concurrent.*;
 @ApplicationScoped
 public class ThreadUtils {
 
+    public Thread.UncaughtExceptionHandler mailUncaughtException() {
+        // TODO - create mail system to send data on exceptions.
+        return (runnable, throwable) -> {};
+    }
+
     public ThreadPoolExecutor getExecutor(
             String threadName,
             Integer min,

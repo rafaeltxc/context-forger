@@ -3,6 +3,7 @@ package com.forger.extractor.infrastructure.provider;
 import com.forger.extractor.domain.model.Extraction;
 import com.forger.extractor.domain.record.configuration.CrawlerConfiguration;
 import com.forger.extractor.domain.record.job.PlaywrightJob;
+import com.forger.extractor.infrastructure.processor.ContextProcessor;
 import com.forger.extractor.utils.ThreadUtils;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
@@ -13,6 +14,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -28,22 +30,27 @@ public class PlaywrightConfigurationProvider {
 
     private static final Integer MAX_OPEN_CONTEXTS = 5;
 
-    private final CrawlerConfigurationProvider crawlerConfigurationProvider;
+    private final ContextProcessor contextProcessor;
 
     private final ThreadUtils threadUtils;
 
+    private final CrawlerConfiguration crawlerConfiguration;
+
+    protected final List<Thread> threads;
+
     protected LinkedBlockingQueue<PlaywrightJob> jobs;
 
-    protected List<Thread> threads;
-
     public PlaywrightConfigurationProvider(
+            ContextProcessor contextProcessor,
             CrawlerConfigurationProvider crawlerConfigurationProvider,
             ThreadUtils threadUtils
     ) {
-        this.crawlerConfigurationProvider = crawlerConfigurationProvider;
+        this.contextProcessor = contextProcessor;
         this.threadUtils = threadUtils;
 
+        this.crawlerConfiguration = crawlerConfigurationProvider.toDomain();
         this.jobs = new LinkedBlockingQueue<>();
+        this.threads = new ArrayList<>();
     }
 
     public Extraction provide(URI uri, BiFunction<URI, BrowserContext, Extraction> job) {
@@ -62,23 +69,31 @@ public class PlaywrightConfigurationProvider {
     }
 
     public void initializeContext() {
-        if (Objects.nonNull(this.threads) && !this.threads.isEmpty()) {
+        // We only get half of the work force, as Playwright consumes much more heap space
+        int totalWorkers = this.crawlerConfiguration.connectionWorkers() > 1
+                ? this.crawlerConfiguration.connectionWorkers() / 2
+                : 1;
+
+        if (Objects.nonNull(this.threads)
+                && this.threads.size() >= totalWorkers) {
             return;
         }
 
-        CrawlerConfiguration configuration =
-                this.crawlerConfigurationProvider.toDomain();
+        int totalThreads = this.threads.size() - totalWorkers;
 
-        // We only get half of the work force, as Playwright consumes much more heap space
-        int totalWorkers = configuration.connectionWorkers() > 1
-                ? configuration.connectionWorkers() / 2
-                : 1;
+        synchronized (this.threads) {
+            for (int i = 0; i < totalThreads; i++) {
+                this.threads.add(Thread.ofPlatform()
+                        .name(String.format("PlaywrightJob-%d", i))
+                        .uncaughtExceptionHandler((_, throwable) -> {
+                            this.threads
+                                    .removeIf(Thread::isInterrupted);
 
-        for (int i = 0; i < totalWorkers; i++) {
-            this.threads.add(Thread.ofPlatform()
-                    .name(String.format("PlaywrightJob-%d", i))
-                    // TODO - Create uncaught exception handler to fallback
-                    .start(new ConfigurationProviderRunner()));
+                            this.contextProcessor
+                                    .saveErrorFrom(throwable);
+                        })
+                        .start(new ConfigurationProviderRunner()));
+            }
         }
     }
 
@@ -144,6 +159,7 @@ public class PlaywrightConfigurationProvider {
             } catch (Exception e) {
                 Log.errorf("Process terminated unexpectedly " +
                         "while scraping page with Playwright.", e);
+                contextProcessor.saveErrorFrom(e);
             } finally {
                 // TODO - Thread fallback for failed jobs.
             }
@@ -162,6 +178,8 @@ public class PlaywrightConfigurationProvider {
             } catch (Exception e) {
                 Log.errorf("An error was caught scraping the " +
                         "URL: %s. Jobs will be saved for retrying.", applier.uri());
+
+                contextProcessor.saveErrorFrom(e);
 
                 this.takenJobs
                         .remove(applier);
