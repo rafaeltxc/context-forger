@@ -188,12 +188,22 @@ public class PlaywrightConfigurationProvider {
             } finally {
                 for (PlaywrightJob job : this.takenJobs) {
                     if (!job.future().isDone()) {
-                        // TODO - Job not completed due exception. Add to the execution queue again.
+                        try {
+                            jobs.put(job);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
                     }
                 }
 
                 for (PlaywrightJob job : this.defectiveJobs) {
-                    // TODO - Defective job not completed. Retry process only one time to be sure.
+                    CompletableFuture.runAsync(() -> {
+                        try {
+                            this.retryFrom(job);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }, this.executor);
                 }
 
                 this.executor.shutdown();
@@ -216,20 +226,10 @@ public class PlaywrightConfigurationProvider {
 
         private void processFrom(PlaywrightJob applier) throws InterruptedException {
             try {
-                Extraction extraction = applier.job().apply(
-                        applier.uri(), this.contextFrom(this.playwright, this.browsers));
+                this.simpleProcess(applier);
 
-                applier.future()
-                        .complete(extraction);
-
-                this.takenJobs
-                        .remove(applier);
+                this.takenJobs.remove(applier);
             } catch (Exception e) {
-                Log.errorf("An error was caught scraping the " +
-                        "URL: %s. Jobs will be saved for retrying.", applier.uri());
-
-                contextProcessor.saveErrorFrom(e);
-
                 this.takenJobs
                         .remove(applier);
                 this.defectiveJobs
@@ -238,6 +238,14 @@ public class PlaywrightConfigurationProvider {
         }
 
         private void retryFrom(PlaywrightJob applier) throws InterruptedException {
+            try {
+                this.simpleProcess(applier);
+            } catch (Exception e) {
+                applier.future().completeExceptionally(e);
+            }
+        }
+
+        private void simpleProcess(PlaywrightJob applier) {
             try {
                 Extraction extraction = applier.job().apply(
                         applier.uri(), this.contextFrom(this.playwright, this.browsers));
@@ -249,6 +257,8 @@ public class PlaywrightConfigurationProvider {
                         "retrying scraping the URL: %s.", applier.uri());
 
                 contextProcessor.saveErrorFrom(e);
+            } finally {
+                this.semaphore.release();
             }
         }
 
