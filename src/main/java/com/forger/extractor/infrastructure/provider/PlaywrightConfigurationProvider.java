@@ -9,36 +9,40 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Playwright;
 import io.quarkus.logging.Log;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.net.URI;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 
 @ApplicationScoped
 public class PlaywrightConfigurationProvider {
 
-    private static final Duration QUEUE_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration QUEUE_TIMEOUT = Duration.ofMinutes(3);
 
     private static final Integer MAX_OPEN_PAGES = 10;
 
     private static final Integer MAX_OPEN_CONTEXTS = 5;
 
+    private static final Integer JOB_QUEUE_BOUNDARY = 1000;
+
     private final ContextProcessor contextProcessor;
+
+    private final CrawlerConfigurationProvider  crawlerConfigurationProvider;
 
     private final ThreadUtils threadUtils;
 
-    private final CrawlerConfiguration crawlerConfiguration;
+    private final AtomicInteger activeWorkers;
 
-    protected final List<Thread> threads;
+    private final LinkedBlockingQueue<PlaywrightJob> jobs;
 
-    protected LinkedBlockingQueue<PlaywrightJob> jobs;
+    private ThreadPoolExecutor executor;
 
     public PlaywrightConfigurationProvider(
             ContextProcessor contextProcessor,
@@ -46,54 +50,56 @@ public class PlaywrightConfigurationProvider {
             ThreadUtils threadUtils
     ) {
         this.contextProcessor = contextProcessor;
+        this.crawlerConfigurationProvider = crawlerConfigurationProvider;
         this.threadUtils = threadUtils;
 
-        this.crawlerConfiguration = crawlerConfigurationProvider.toDomain();
-        this.jobs = new LinkedBlockingQueue<>();
-        this.threads = new ArrayList<>();
+        this.activeWorkers =
+                new AtomicInteger(0);
+        this.jobs =
+                new LinkedBlockingQueue<>(JOB_QUEUE_BOUNDARY);
     }
 
-    public Extraction provide(URI uri, BiFunction<URI, BrowserContext, Extraction> job) {
-        this.initializeContext();
+    @PostConstruct
+    public void setup() {
+        CrawlerConfiguration crawlerConfiguration =
+                crawlerConfigurationProvider.toDomain();
 
-        UUID uuid = UUID.randomUUID();
+        // We only get half of the work force, as Playwright consumes much more heap space
+        int totalWorkers = crawlerConfiguration.connectionWorkers() > 1
+                ? crawlerConfiguration.connectionWorkers() / 2
+                : 1;
 
+        this.executor = this.threadUtils.getExecutor("PlaywrightJob-%d", 1, totalWorkers,
+                Duration.ZERO, this.threadUtils.getErroLoggingExceptionHandler(this.contextProcessor));
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        this.executor.shutdown();
+    }
+
+    public Extraction provide(URI uri, BiFunction<URI, BrowserContext, Extraction> job) throws InterruptedException {
         CompletableFuture<Extraction> future = new CompletableFuture<>();
 
         PlaywrightJob playwrightJob =
-                new PlaywrightJob(uuid, job, uri, future);
+                new PlaywrightJob(job, uri, future);
 
-        jobs.offer(playwrightJob);
+        jobs.put(playwrightJob);
+
+        this.initializeContext();
 
         return future.join();
     }
 
-    public void initializeContext() {
-        // We only get half of the work force, as Playwright consumes much more heap space
-        int totalWorkers = this.crawlerConfiguration.connectionWorkers() > 1
-                ? this.crawlerConfiguration.connectionWorkers() / 2
-                : 1;
+    public synchronized void initializeContext() {
+        int maxActiveTasks = this.executor.getMaximumPoolSize();
+        int missingTasks = maxActiveTasks - this.activeWorkers.get();
 
-        if (Objects.nonNull(this.threads)
-                && this.threads.size() >= totalWorkers) {
-            return;
-        }
-
-        int totalThreads = this.threads.size() - totalWorkers;
-
-        synchronized (this.threads) {
-            for (int i = 0; i < totalThreads; i++) {
-                this.threads.add(Thread.ofPlatform()
-                        .name(String.format("PlaywrightJob-%d", i))
-                        .uncaughtExceptionHandler((_, throwable) -> {
-                            this.threads
-                                    .removeIf(Thread::isInterrupted);
-
-                            this.contextProcessor
-                                    .saveErrorFrom(throwable);
-                        })
-                        .start(new ConfigurationProviderRunner()));
-            }
+        for (int  i = 0; i < missingTasks; i++) {
+            this.activeWorkers
+                    .incrementAndGet();
+            this.executor
+                    .submit(new ConfigurationProviderRunner());
         }
     }
 
@@ -111,6 +117,10 @@ public class PlaywrightConfigurationProvider {
 
         private final Semaphore semaphore;
 
+        private final AtomicInteger activeRunerWorkers;
+
+        private final Object lock;
+
         @PreDestroy
         public void shutdown() {
             this.browsers
@@ -122,7 +132,7 @@ public class PlaywrightConfigurationProvider {
 
         public ConfigurationProviderRunner() {
             this.executor = threadUtils.getExecutor(Thread.currentThread().getName() + "-RUNNER-%d",
-                    1, MAX_OPEN_PAGES * MAX_OPEN_CONTEXTS, Duration.ofSeconds(20));
+                    1, MAX_OPEN_PAGES * MAX_OPEN_CONTEXTS, Duration.ofSeconds(20), threadUtils.getErroLoggingExceptionHandler(contextProcessor));
             this.playwright =
                     Playwright.create();
             this.browsers =
@@ -133,6 +143,10 @@ public class PlaywrightConfigurationProvider {
                     new CopyOnWriteArrayList<>();
             this.semaphore =
                     new Semaphore(MAX_OPEN_PAGES * MAX_OPEN_CONTEXTS);
+            this.activeRunerWorkers =
+                    new AtomicInteger(0);
+            this.lock =
+                    new Object();
         }
 
         @Override
@@ -143,16 +157,27 @@ public class PlaywrightConfigurationProvider {
                             QUEUE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
 
                     if (Objects.isNull(job)) {
+                        this.startShuttingDown();
                         break;
                     }
 
                     this.takenJobs.add(job);
 
                     CompletableFuture.runAsync(() -> {
+                        this.activeRunerWorkers.incrementAndGet();
+
                         try {
                             this.processFrom(job);
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
+                        } finally {
+                            int runningTasks = this.activeRunerWorkers.decrementAndGet();
+
+                            if (runningTasks == 0) {
+                                synchronized (this.lock) {
+                                    lock.notifyAll();
+                                }
+                            }
                         }
                     }, this.executor);
                 }
@@ -161,7 +186,31 @@ public class PlaywrightConfigurationProvider {
                         "while scraping page with Playwright.", e);
                 contextProcessor.saveErrorFrom(e);
             } finally {
-                // TODO - Thread fallback for failed jobs.
+                for (PlaywrightJob job : this.takenJobs) {
+                    if (!job.future().isDone()) {
+                        // TODO - Job not completed due exception. Add to the execution queue again.
+                    }
+                }
+
+                for (PlaywrightJob job : this.defectiveJobs) {
+                    // TODO - Defective job not completed. Retry process only one time to be sure.
+                }
+
+                this.executor.shutdown();
+
+                activeRunerWorkers.decrementAndGet();
+
+                if (!Thread.currentThread().isInterrupted()) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
+
+        private void startShuttingDown() throws InterruptedException {
+            synchronized (this.lock) {
+                while (this.activeRunerWorkers.intValue() > 0) {
+                    this.lock.wait();
+                }
             }
         }
 
@@ -185,6 +234,21 @@ public class PlaywrightConfigurationProvider {
                         .remove(applier);
                 this.defectiveJobs
                         .add(applier);
+            }
+        }
+
+        private void retryFrom(PlaywrightJob applier) throws InterruptedException {
+            try {
+                Extraction extraction = applier.job().apply(
+                        applier.uri(), this.contextFrom(this.playwright, this.browsers));
+
+                applier.future()
+                        .complete(extraction);
+            } catch (Exception e) {
+                Log.errorf("An error was caught " +
+                        "retrying scraping the URL: %s.", applier.uri());
+
+                contextProcessor.saveErrorFrom(e);
             }
         }
 

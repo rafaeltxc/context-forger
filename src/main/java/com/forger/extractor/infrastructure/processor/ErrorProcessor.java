@@ -19,7 +19,7 @@ public class ErrorProcessor {
     public Thread logAsyncWith(UUID uuid, Throwable throwable) {
         return Thread.ofVirtual()
                 .name("errorProcessor-" + uuid.toString() + "-%d")
-                .uncaughtExceptionHandler(this.threadUtils.mailUncaughtException())
+                .uncaughtExceptionHandler(this.threadUtils.getGenericExceptionHandler(null))
                 .start(() -> this.logWith(uuid, throwable));
     }
 
